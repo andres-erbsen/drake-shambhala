@@ -40,16 +40,19 @@
  */
 
 #include <cmath>
+#include <cstdio>
 
 #include <Eigen/Core>
 
 #include <drake/common/autodiff.h>  // IWYU pragma: keep
+#include <drake/common/default_scalars.h>
 #include <drake/common/drake_assert.h>
 #include <drake/common/unused.h>
 #include <drake/systems/analysis/simulator.h>
 #include <drake/systems/framework/context.h>
 #include <drake/systems/framework/continuous_state.h>
 #include <drake/systems/framework/vector_system.h>
+#include <drake/systems/trajectory_optimization/direct_collocation.h>
 
 namespace shambhala {
 namespace systems {
@@ -60,31 +63,35 @@ namespace systems {
  * xdot = -x + x^3
  * y = x
  */
-class SimpleContinuousTimeSystem : public drake::systems::VectorSystem<double> {
+template <typename T>
+class SimpleContinuousTimeSystem final : public drake::systems::VectorSystem<T> {
  public:
-  SimpleContinuousTimeSystem()
-      : drake::systems::VectorSystem<double>(0,    // Zero inputs.
-                                             1) {  // One output.
-    this->DeclareContinuousState(1);               // One state variable.
+  DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(SimpleContinuousTimeSystem);
+  SimpleContinuousTimeSystem() : drake::systems::VectorSystem<T>(::drake::systems::SystemTypeTag<SimpleContinuousTimeSystem>{}, 0, 1) { // n_in, n_out
+    this->DeclareContinuousState(1); // n_state
   }
+
+  // Scalar-converting copy constructor.  See @ref system_scalar_conversion.
+  template <typename U>
+  explicit SimpleContinuousTimeSystem(const SimpleContinuousTimeSystem<U>&) : SimpleContinuousTimeSystem<T>() {}
 
  private:
   // xdot = -x + x^3
-  virtual void DoCalcVectorTimeDerivatives(
-      const drake::systems::Context<double>& context,
-      const Eigen::VectorBlock<const Eigen::VectorXd>& input,
-      const Eigen::VectorBlock<const Eigen::VectorXd>& state,
-      Eigen::VectorBlock<Eigen::VectorXd>* derivatives) const {
+  void DoCalcVectorTimeDerivatives(
+      const drake::systems::Context<T>& context,
+      const Eigen::VectorBlock<const drake::VectorX<T>>& input,
+      const Eigen::VectorBlock<const drake::VectorX<T>>& state,
+      Eigen::VectorBlock<drake::VectorX<T>>* derivatives) const override {
     drake::unused(context, input);
-    (*derivatives)(0) = -state(0) + std::pow(state(0), 3.0);
+    (*derivatives)(0) = -state(0) + state(0)*state(0)*state(0);
   }
 
   // y = x
-  virtual void DoCalcVectorOutput(
-      const drake::systems::Context<double>& context,
-      const Eigen::VectorBlock<const Eigen::VectorXd>& input,
-      const Eigen::VectorBlock<const Eigen::VectorXd>& state,
-      Eigen::VectorBlock<Eigen::VectorXd>* output) const {
+  void DoCalcVectorOutput(
+      const drake::systems::Context<T>& context,
+      const Eigen::VectorBlock<const drake::VectorX<T>>& input,
+      const Eigen::VectorBlock<const drake::VectorX<T>>& state,
+      Eigen::VectorBlock<drake::VectorX<T>>* output) const /*override*/ {
     drake::unused(context, input);
     *output = state;
   }
@@ -93,25 +100,39 @@ class SimpleContinuousTimeSystem : public drake::systems::VectorSystem<double> {
 }  // namespace systems
 }  // namespace shambhala
 
+DRAKE_DEFINE_CLASS_TEMPLATE_INSTANTIATIONS_ON_DEFAULT_SCALARS(
+    class ::shambhala::systems::SimpleContinuousTimeSystem)
+
 int main() {
   // Create the simple system.
-  shambhala::systems::SimpleContinuousTimeSystem system;
+  shambhala::systems::SimpleContinuousTimeSystem<double> system;
 
-  // Create the simulator.
-  drake::systems::Simulator<double> simulator(system);
+  auto context = system.CreateDefaultContext();
+  const int N = 201;
+  const double dt_min = 10./N;
+  const double dt_max = 10./N;
+  drake::systems::trajectory_optimization::DirectCollocation dircol(
+      &system, *context, N, dt_min, dt_max);
+  dircol.AddLinearConstraint(dircol.initial_state()(0) == .9);
+  auto result = dircol.Solve();
+  if (result != drake::solvers::SolutionResult::kSolutionFound) {
+    fprintf(stderr, "solving failed (%d)!\n", result);
+    return 1;
+  }
 
-  // Set the initial conditions x(0).
-  drake::systems::ContinuousState<double>& state =
-      simulator.get_mutable_context().get_mutable_continuous_state();
-  state[0] = 0.9;
+  {
+    // auto inputs = dircol.ReconstructInputTrajectory();
+    auto traj = dircol.ReconstructStateTrajectory();
+    auto timestamps = traj.get_segment_times();
+    for (size_t i = 0; i < timestamps.size(); i++) {
+      auto t = timestamps[i];
+      auto x = traj.value(timestamps[i]).coeff(0);
+      printf("%f    %f\n", t, x);
+    }
+    printf("\n");
+    DRAKE_DEMAND(traj.value(timestamps[N-1]).coeff(0) < 1.0e-4);
+  }
 
-  // Simulate for 10 seconds.
-  simulator.StepTo(10);
-
-  // Make sure the simulation converges to the stable fixed point at x=0.
-  DRAKE_DEMAND(state[0] < 1.0e-4);
-
-  // TODO(russt): Make a plot of the resulting trajectory.
 
   return 0;
 }
