@@ -91,6 +91,7 @@ class SimpleContinuousTimeSystem final : public drake::systems::VectorSystem<T> 
     const double k = .08;
     const double S = .23;
     const double rho = 1; // TODO real value
+    const double windspeed_gradient = .02; // jet stream at 5km: .02
 
     const auto& speed = state(0);
     const auto& pitch = state(1);
@@ -99,8 +100,6 @@ class SimpleContinuousTimeSystem final : public drake::systems::VectorSystem<T> 
 
     const auto& cL    = input(0);
     const auto& roll  = input(1);
-
-    const T windspeed_gradient = 0;
 
     const T altitude_dot = speed*sin(pitch);
     const T Wd = windspeed_gradient*altitude_dot;
@@ -141,28 +140,50 @@ int main() {
   shambhala::systems::SimpleContinuousTimeSystem<double> system;
 
   auto context = system.CreateDefaultContext();
-  const int N = 201;
-  const double dt_min = 10./N;
-  const double dt_max = 10./N;
+  const int N = 101;
+  const double dt_min = 30./N;
+  const double dt_max = 30./N;
   drake::systems::trajectory_optimization::DirectCollocation dircol(
       &system, *context, N, dt_min, dt_max);
 
   // initial state
-  dircol.AddLinearConstraint(dircol.initial_state()(0) == 13);
+  dircol.AddLinearConstraint(dircol.initial_state()(0) == 1.5*13);
   dircol.AddLinearConstraint(dircol.initial_state()(1) == 0);
+  dircol.AddLinearConstraint(dircol.initial_state()(2) == 0);
   dircol.AddLinearConstraint(dircol.initial_state()(3) == 0);
 
   // design limits
-  dircol.AddConstraintToAllKnotPoints(dircol.state()(3) >= 0); // z >= 0
+  auto tau = 4*acos(0);
 
   dircol.AddConstraintToAllKnotPoints(dircol.input()(0) >= 0); // 0 <= cL <= 1.2
   dircol.AddConstraintToAllKnotPoints(dircol.input()(0) <= 1.2);
 
+  dircol.AddConstraintToAllKnotPoints(dircol.input()(1) >= -tau); // roll wraps around at most twice
+  dircol.AddConstraintToAllKnotPoints(dircol.input()(1) <=  tau);
+
+  dircol.AddConstraintToAllKnotPoints(dircol.state()(0) >= 0);
+  dircol.AddConstraintToAllKnotPoints(dircol.state()(0) <= 140); // DS Kinetic 60 speed record 140 m/s
+
+  dircol.AddConstraintToAllKnotPoints(dircol.state()(1) >= -tau/2); // pitch looks forward
+  dircol.AddConstraintToAllKnotPoints(dircol.state()(1) <=  tau/2);
+
+  dircol.AddConstraintToAllKnotPoints(dircol.state()(2) >= -1.5*tau); // we want one turn in either direction
+  dircol.AddConstraintToAllKnotPoints(dircol.state()(2) <=  1.5*tau);  // and allow an extra half turn
+
+  dircol.AddConstraintToAllKnotPoints(dircol.state()(3) >= -500); // max 1km altitude differential (arbitrary)
+  dircol.AddConstraintToAllKnotPoints(dircol.state()(3) <=  500);
+
   // planning target
-  dircol.AddFinalCost(-(9.8*dircol.state()(3) + .5*dircol.state()(0)*dircol.state()(0)) ); // negative energy
+  // dircol.AddFinalCost(-(9.8*dircol.state()(3) + .5*dircol.state()(0)*dircol.state()(0)) ); // negative energy
+
+  // dircol.AddConstraint(dircol.initial_state()(0) <= dircol.final_state()(0));
+  // dircol.AddConstraint(dircol.initial_state()(1) == dircol.final_state()(1));
+  // dircol.AddConstraint(dircol.initial_state()(2) == dircol.final_state()(2) + 4*acos(0));
+  // dircol.AddConstraint(dircol.initial_state()(3) <= dircol.final_state()(3));
+
 
   // solver spoonfeeding
-  dircol.AddConstraintToAllKnotPoints(dircol.state()(0) >= 13./2);
+  dircol.AddConstraintToAllKnotPoints(dircol.state()(0) >= 1); // nonzero speed!
 
   auto result = dircol.Solve();
   if (result != drake::solvers::SolutionResult::kSolutionFound) {
@@ -176,9 +197,13 @@ int main() {
     auto timestamps = traj.get_segment_times();
     for (size_t i = 0; i < timestamps.size(); i++) {
       auto t = timestamps[i];
-      auto u = inputs.value(timestamps[i]).coeff(0);
-      auto x = traj.value(timestamps[i]).coeff(0);
-      printf("%f < %f >   %f\n", t, u, x);
+      auto V = traj.value(timestamps[i]).coeff(0);
+      auto pitch = traj.value(timestamps[i]).coeff(1);
+      auto yaw = traj.value(timestamps[i]).coeff(2);
+      auto altitude = traj.value(timestamps[i]).coeff(3);
+      auto cL = inputs.value(timestamps[i]).coeff(0);
+      auto roll = inputs.value(timestamps[i]).coeff(1);
+      printf("%3.3f: %3.3f %3.3f %3.3f %3.3f <<- %3.3f %3.3f | %3.3f\n", t, V, pitch, yaw, altitude, cL, roll, 9.8*altitude + .5*V*V);
     }
     printf("\n");
   }
