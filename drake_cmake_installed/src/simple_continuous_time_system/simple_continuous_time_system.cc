@@ -92,8 +92,11 @@ class SimpleContinuousTimeSystem final : public drake::systems::VectorSystem<T> 
     const double S = .23;
     const double rho = 1; // TODO real value
     const double windspeed_gradient = .059; // jet stream at 5km: .02
-    // yaw+=pi: .57: infeasible .58: iterlimit .59 success
-    // yaw+=0: .57: infeasible .58: infeasible .59: success
+    // with -tau <= roll <= tau:
+    // // yaw+=pi: .57: infeasible .58: iterlimit .59 success
+    // // yaw+=0: .57: infeasible .58: infeasible .59: success
+    // with -tau/4 <= roll <= tau/4:
+    // // yaw+=pi: .57: infeasible .58: infeasible .59 success
 
     const auto& speed = state(0);
     const auto& pitch = state(1);
@@ -156,8 +159,8 @@ int main() {
   dircol.AddConstraintToAllKnotPoints(dircol.input()(0) >= 0); // 0 <= cL <= 1.2
   dircol.AddConstraintToAllKnotPoints(dircol.input()(0) <= 1.2);
 
-  dircol.AddConstraintToAllKnotPoints(dircol.input()(1) >= -tau); // roll wraps around at most twice
-  dircol.AddConstraintToAllKnotPoints(dircol.input()(1) <=  tau);
+  dircol.AddConstraintToAllKnotPoints(dircol.input()(1) >= -tau/2); // roll does not wrap
+  dircol.AddConstraintToAllKnotPoints(dircol.input()(1) <=  tau/2);
 
   dircol.AddConstraintToAllKnotPoints(dircol.state()(0) >= 0);
   dircol.AddConstraintToAllKnotPoints(dircol.state()(0) <= 140); // DS Kinetic 60 speed record 140 m/s
@@ -190,10 +193,13 @@ int main() {
   // solver spoonfeeding
   dircol.AddConstraintToAllKnotPoints(dircol.state()(0) >= 1); // nonzero speed!
 
+  dircol.AddConstraintToAllKnotPoints(dircol.input()(1) >= -tau/4); // do not turn the plane upside down
+  dircol.AddConstraintToAllKnotPoints(dircol.input()(1) <=  tau/4);
+
   auto result = dircol.Solve();
   if (result != drake::solvers::SolutionResult::kSolutionFound) {
     auto s = drake::solvers::to_string(result);
-    fprintf(stderr, "solving failed: %s\n", s.c_str());
+    printf("solving failed: %s\n", s.c_str());
     return 1;
   }
 
@@ -201,6 +207,7 @@ int main() {
     auto inputs = dircol.ReconstructInputTrajectory();
     auto traj = dircol.ReconstructStateTrajectory();
     auto timestamps = traj.get_segment_times();
+    printf("[\n");
     for (size_t i = 0; i < timestamps.size(); i++) {
       auto t = timestamps[i];
       auto V = traj.value(timestamps[i]).coeff(0);
@@ -209,9 +216,9 @@ int main() {
       auto altitude = traj.value(timestamps[i]).coeff(3);
       auto cL = inputs.value(timestamps[i]).coeff(0);
       auto roll = inputs.value(timestamps[i]).coeff(1);
-      printf("%3.3f: %3.3f %3.3f %3.3f %3.3f <<- %3.3f %3.3f | %3.3f\n", t, V, pitch, yaw, altitude, cL, roll, 9.8*altitude + .5*V*V);
+      printf("(%03.3f,  %03.3f, %03.3f, %03.3f, %03.3f,  %03.3f, %03.3f), # %3.3f\n", t, V, pitch, yaw, altitude, cL, roll, 9.8*altitude + .5*V*V);
     }
-    printf("\n");
+    printf("]\n");
   }
 
 
