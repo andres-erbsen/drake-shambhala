@@ -67,8 +67,8 @@ template <typename T>
 class SimpleContinuousTimeSystem final : public drake::systems::VectorSystem<T> {
  public:
   DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(SimpleContinuousTimeSystem);
-  SimpleContinuousTimeSystem() : drake::systems::VectorSystem<T>(::drake::systems::SystemTypeTag<SimpleContinuousTimeSystem>{}, 0, 1) { // n_in, n_out
-    this->DeclareContinuousState(1); // n_state
+  SimpleContinuousTimeSystem() : drake::systems::VectorSystem<T>(::drake::systems::SystemTypeTag<SimpleContinuousTimeSystem>{}, 2, 1) { // n_in, n_out
+    this->DeclareContinuousState(4); // n_state
   }
 
   // Scalar-converting copy constructor.  See @ref system_scalar_conversion.
@@ -82,8 +82,41 @@ class SimpleContinuousTimeSystem final : public drake::systems::VectorSystem<T> 
       const Eigen::VectorBlock<const drake::VectorX<T>>& input,
       const Eigen::VectorBlock<const drake::VectorX<T>>& state,
       Eigen::VectorBlock<drake::VectorX<T>>* derivatives) const override {
-    drake::unused(context, input);
-    (*derivatives)(0) = -state(0) + state(0)*state(0)*state(0);
+
+    // TODO: parametrize
+    // DS Kinetic 60
+    const double m = 2;
+    const double g = 9.8;
+    const double cD0 = .005;
+    const double k = .08;
+    const double S = .23;
+    const double rho = 1; // TODO real value
+
+    const auto& speed = state(0);
+    const auto& pitch = state(1);
+    const auto& yaw   = state(2);
+    const auto& z     = state(3);
+
+    const auto& cL    = input(0);
+    const auto& roll  = input(1);
+
+    const T windspeed_gradient = 0;
+
+    const T altitude_dot = speed*sin(pitch);
+    const T Wd = windspeed_gradient*altitude_dot;
+
+    const auto cD = cD0 + k*cL*cL;
+    const auto D = .5*cD*rho*S*speed*speed;
+    const auto L = .5*cL*rho*S*speed*speed;
+
+    (*derivatives)(0) = 1/(m                 )*(     -D      - m*g*sin(pitch) + m*Wd*cos(pitch)*sin(yaw));
+    (*derivatives)(1) = 1/(m                 )*(     -D      - m*g*sin(pitch) + m*Wd*cos(pitch)*sin(yaw));
+    (*derivatives)(2) = 1/(m*speed           )*( L*cos(roll) - m*g*cos(pitch) - m*Wd*sin(pitch)*sin(yaw));
+    (*derivatives)(3) = 1/(m*speed*cos(pitch))*( L*sin(roll)                  + m*Wd           *cos(yaw));
+
+    // notes:
+    // ipopt needs speed replaced with (1e-4+speed), snopt only needs that if speed is not constrained away from 0
+
   }
 
   // y = x
@@ -113,7 +146,24 @@ int main() {
   const double dt_max = 10./N;
   drake::systems::trajectory_optimization::DirectCollocation dircol(
       &system, *context, N, dt_min, dt_max);
-  dircol.AddLinearConstraint(dircol.initial_state()(0) == .9);
+
+  // initial state
+  dircol.AddLinearConstraint(dircol.initial_state()(0) == 13);
+  dircol.AddLinearConstraint(dircol.initial_state()(1) == 0);
+  dircol.AddLinearConstraint(dircol.initial_state()(3) == 0);
+
+  // design limits
+  dircol.AddConstraintToAllKnotPoints(dircol.state()(3) >= 0); // z >= 0
+
+  dircol.AddConstraintToAllKnotPoints(dircol.input()(0) >= 0); // 0 <= cL <= 1.2
+  dircol.AddConstraintToAllKnotPoints(dircol.input()(0) <= 1.2);
+
+  // planning target
+  dircol.AddFinalCost(-(9.8*dircol.state()(3) + .5*dircol.state()(0)*dircol.state()(0)) ); // negative energy
+
+  // solver spoonfeeding
+  dircol.AddConstraintToAllKnotPoints(dircol.state()(0) >= 13./2);
+
   auto result = dircol.Solve();
   if (result != drake::solvers::SolutionResult::kSolutionFound) {
     fprintf(stderr, "solving failed (%d)!\n", result);
@@ -121,16 +171,16 @@ int main() {
   }
 
   {
-    // auto inputs = dircol.ReconstructInputTrajectory();
+    auto inputs = dircol.ReconstructInputTrajectory();
     auto traj = dircol.ReconstructStateTrajectory();
     auto timestamps = traj.get_segment_times();
     for (size_t i = 0; i < timestamps.size(); i++) {
       auto t = timestamps[i];
+      auto u = inputs.value(timestamps[i]).coeff(0);
       auto x = traj.value(timestamps[i]).coeff(0);
-      printf("%f    %f\n", t, x);
+      printf("%f < %f >   %f\n", t, u, x);
     }
     printf("\n");
-    DRAKE_DEMAND(traj.value(timestamps[N-1]).coeff(0) < 1.0e-4);
   }
 
 
