@@ -91,7 +91,9 @@ class SimpleContinuousTimeSystem final : public drake::systems::VectorSystem<T> 
     const double k = .08;
     const double S = .23;
     const double rho = 1; // TODO real value
-    const double windspeed_gradient = .02; // jet stream at 5km: .02
+    const double windspeed_gradient = .059; // jet stream at 5km: .02
+    // yaw+=pi: .57: infeasible .58: iterlimit .59 success
+    // yaw+=0: .57: infeasible .58: infeasible .59: success
 
     const auto& speed = state(0);
     const auto& pitch = state(1);
@@ -101,17 +103,17 @@ class SimpleContinuousTimeSystem final : public drake::systems::VectorSystem<T> 
     const auto& cL    = input(0);
     const auto& roll  = input(1);
 
-    const T altitude_dot = speed*sin(pitch);
-    const T Wd = windspeed_gradient*altitude_dot;
+    const auto altitude_dot = speed*sin(pitch);
+    const auto Wd = windspeed_gradient*altitude_dot;
 
     const auto cD = cD0 + k*cL*cL;
     const auto D = .5*cD*rho*S*speed*speed;
     const auto L = .5*cL*rho*S*speed*speed;
 
     (*derivatives)(0) = 1/(m                 )*(     -D      - m*g*sin(pitch) + m*Wd*cos(pitch)*sin(yaw));
-    (*derivatives)(1) = 1/(m                 )*(     -D      - m*g*sin(pitch) + m*Wd*cos(pitch)*sin(yaw));
-    (*derivatives)(2) = 1/(m*speed           )*( L*cos(roll) - m*g*cos(pitch) - m*Wd*sin(pitch)*sin(yaw));
-    (*derivatives)(3) = 1/(m*speed*cos(pitch))*( L*sin(roll)                  + m*Wd           *cos(yaw));
+    (*derivatives)(1) = 1/(m*speed           )*( L*cos(roll) - m*g*cos(pitch) - m*Wd*sin(pitch)*sin(yaw));
+    (*derivatives)(2) = 1/(m*speed*cos(pitch))*( L*sin(roll)                  + m*Wd           *cos(yaw));
+    (*derivatives)(3) = altitude_dot;
 
     // notes:
     // ipopt needs speed replaced with (1e-4+speed), snopt only needs that if speed is not constrained away from 0
@@ -141,16 +143,12 @@ int main() {
 
   auto context = system.CreateDefaultContext();
   const int N = 101;
-  const double dt_min = 30./N;
-  const double dt_max = 30./N;
+  const double dt_min = 10./N;
+  const double dt_max = 60./N;
   drake::systems::trajectory_optimization::DirectCollocation dircol(
       &system, *context, N, dt_min, dt_max);
+  dircol.AddEqualTimeIntervalsConstraints();
 
-  // initial state
-  dircol.AddLinearConstraint(dircol.initial_state()(0) == 1.5*13);
-  dircol.AddLinearConstraint(dircol.initial_state()(1) == 0);
-  dircol.AddLinearConstraint(dircol.initial_state()(2) == 0);
-  dircol.AddLinearConstraint(dircol.initial_state()(3) == 0);
 
   // design limits
   auto tau = 4*acos(0);
@@ -174,20 +172,28 @@ int main() {
   dircol.AddConstraintToAllKnotPoints(dircol.state()(3) <=  500);
 
   // planning target
-  // dircol.AddFinalCost(-(9.8*dircol.state()(3) + .5*dircol.state()(0)*dircol.state()(0)) ); // negative energy
 
-  // dircol.AddConstraint(dircol.initial_state()(0) <= dircol.final_state()(0));
-  // dircol.AddConstraint(dircol.initial_state()(1) == dircol.final_state()(1));
-  // dircol.AddConstraint(dircol.initial_state()(2) == dircol.final_state()(2) + 4*acos(0));
-  // dircol.AddConstraint(dircol.initial_state()(3) <= dircol.final_state()(3));
+  // dircol.AddConstraint(dircol.initial_state()(0) == 13);
+  // dircol.AddConstraint(dircol.initial_state()(1) == 0);
+  // dircol.AddConstraint(dircol.initial_state()(2) == 0);
+  // dircol.AddConstraint(dircol.initial_state()(3) == 0);
 
+  dircol.AddConstraint(dircol.final_state()(0) >= dircol.initial_state()(0));
+  dircol.AddConstraint(dircol.final_state()(1) == dircol.initial_state()(1));
+  dircol.AddConstraint(dircol.final_state()(2) == dircol.initial_state()(2) + 1*tau);
+  dircol.AddConstraint(dircol.final_state()(3) >= dircol.initial_state()(3));
+
+  // #define energy(x) (9.8*x(3) + 0*.5*x(0)*x(0))
+  // dircol.AddFinalCost(energy(dircol.initial_state()) - energy(dircol.state()));
+  // #undef energy
 
   // solver spoonfeeding
   dircol.AddConstraintToAllKnotPoints(dircol.state()(0) >= 1); // nonzero speed!
 
   auto result = dircol.Solve();
   if (result != drake::solvers::SolutionResult::kSolutionFound) {
-    fprintf(stderr, "solving failed (%d)!\n", result);
+    auto s = drake::solvers::to_string(result);
+    fprintf(stderr, "solving failed: %s\n", s.c_str());
     return 1;
   }
 
