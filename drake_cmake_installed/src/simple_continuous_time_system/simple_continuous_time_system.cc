@@ -93,6 +93,9 @@ class SimpleContinuousTimeSystem final : public drake::systems::VectorSystem<T> 
     const double m = 2; // http://www.dskinetic.com/k60.aspx
     const double S = .23;
 
+    // const double Vc2 = m*g/(.5*rho*S);
+    // const double lambda = Vc2/g;
+
     const double cD0 = suction ? .0025 : .005; // https://www.tngtech.com/fileadmin/Public/Images/BigTechday/BTD10/Folien/Folien_SpencerLisenby.pdf
     const double k = suction ? 0 : .006;
 
