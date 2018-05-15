@@ -48,6 +48,7 @@
 #include <drake/common/default_scalars.h>
 #include <drake/common/drake_assert.h>
 #include <drake/common/unused.h>
+#include <drake/solvers/snopt_solver.h>
 #include <drake/systems/analysis/simulator.h>
 #include <drake/systems/framework/context.h>
 #include <drake/systems/framework/continuous_state.h>
@@ -83,7 +84,6 @@ class SimpleContinuousTimeSystem final : public drake::systems::VectorSystem<T> 
       const Eigen::VectorBlock<const drake::VectorX<T>>& state,
       Eigen::VectorBlock<drake::VectorX<T>>* derivatives) const override {
 
-    // TODO: parametrize
     // DS Kinetic 60
     const double m = 2;
     const double g = 9.8;
@@ -146,8 +146,8 @@ int main() {
 
   auto context = system.CreateDefaultContext();
   const int N = 101;
-  const double dt_min = 10./N;
-  const double dt_max = 60./N;
+  const double dt_min = 20./N;
+  const double dt_max = 40./N;
   drake::systems::trajectory_optimization::DirectCollocation dircol(
       &system, *context, N, dt_min, dt_max);
   dircol.AddEqualTimeIntervalsConstraints();
@@ -158,9 +158,6 @@ int main() {
 
   dircol.AddConstraintToAllKnotPoints(dircol.input()(0) >= 0); // 0 <= cL <= 1.2
   dircol.AddConstraintToAllKnotPoints(dircol.input()(0) <= 1.2);
-
-  dircol.AddConstraintToAllKnotPoints(dircol.input()(1) >= -tau/2); // roll does not wrap
-  dircol.AddConstraintToAllKnotPoints(dircol.input()(1) <=  tau/2);
 
   dircol.AddConstraintToAllKnotPoints(dircol.state()(0) >= 0);
   dircol.AddConstraintToAllKnotPoints(dircol.state()(0) <= 140); // DS Kinetic 60 speed record 140 m/s
@@ -183,7 +180,7 @@ int main() {
 
   dircol.AddConstraint(dircol.final_state()(0) >= dircol.initial_state()(0));
   dircol.AddConstraint(dircol.final_state()(1) == dircol.initial_state()(1));
-  dircol.AddConstraint(dircol.final_state()(2) == dircol.initial_state()(2) + 1*tau);
+  dircol.AddConstraint(dircol.final_state()(2) == dircol.initial_state()(2) + 0*tau);
   dircol.AddConstraint(dircol.final_state()(3) >= dircol.initial_state()(3));
 
   // #define energy(x) (9.8*x(3) + 0*.5*x(0)*x(0))
@@ -195,6 +192,10 @@ int main() {
 
   dircol.AddConstraintToAllKnotPoints(dircol.input()(1) >= -tau/4); // do not turn the plane upside down
   dircol.AddConstraintToAllKnotPoints(dircol.input()(1) <=  tau/4);
+
+  dircol.SetSolverOption(drake::solvers::SnoptSolver::id(), "Iterations limit", 10000000);
+  dircol.SetSolverOption(drake::solvers::SnoptSolver::id(), "Major iterations limit", 10000);
+
 
   auto result = dircol.Solve();
   if (result != drake::solvers::SolutionResult::kSolutionFound) {
@@ -220,7 +221,4 @@ int main() {
     }
     printf("]\n");
   }
-
-
-  return 0;
 }
