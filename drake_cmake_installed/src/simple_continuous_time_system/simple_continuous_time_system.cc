@@ -71,7 +71,7 @@ class SimpleContinuousTimeSystem final : public drake::systems::VectorSystem<T> 
  public:
   DRAKE_NO_COPY_NO_MOVE_NO_ASSIGN(SimpleContinuousTimeSystem);
   SimpleContinuousTimeSystem() : drake::systems::VectorSystem<T>(::drake::systems::SystemTypeTag<SimpleContinuousTimeSystem>{}, 2, 1) { // n_in, n_out
-    this->DeclareContinuousState(4); // n_state
+    this->DeclareContinuousState(6); // n_state
   }
 
   // Scalar-converting copy constructor.  See @ref system_scalar_conversion.
@@ -120,8 +120,9 @@ class SimpleContinuousTimeSystem final : public drake::systems::VectorSystem<T> 
 
     const double windspeed_gradient = .01; // jet stream at 5km: .02
 
-    const auto altitude_dot = speed*sin(pitch);
-    const auto Wd = windspeed_gradient*altitude_dot;
+    const auto zd = speed*sin(pitch);
+    const auto W = windspeed_gradient*z;
+    const auto Wd = windspeed_gradient*zd;
 
     const auto cD = cD0 + k*cL*cL;
     const auto D = .5*cD*rho*S*speed*speed;
@@ -130,7 +131,9 @@ class SimpleContinuousTimeSystem final : public drake::systems::VectorSystem<T> 
     (*derivatives)(0) = 1/(m                 )*(     -D      - m*g*sin(pitch) + m*Wd*cos(pitch)*sin(yaw));
     (*derivatives)(1) = 1/(m*speed           )*( L*cos(roll) - m*g*cos(pitch) - m*Wd*sin(pitch)*sin(yaw));
     (*derivatives)(2) = 1/(m*speed*cos(pitch))*( L*sin(roll)                  + m*Wd           *cos(yaw));
-    (*derivatives)(3) = altitude_dot;
+    (*derivatives)(3) = zd;
+    (*derivatives)(4) = speed*cos(pitch)*cos(yaw);
+    (*derivatives)(5) = speed*cos(pitch)*sin(yaw) - W;
 
     // notes:
     // ipopt needs speed replaced with (1e-4+speed), snopt only needs that if speed is not constrained away from 0
@@ -191,6 +194,8 @@ int main() {
   // dircol.AddConstraint(dircol.initial_state()(1) == 0);
   // dircol.AddConstraint(dircol.initial_state()(2) == 0);
   // dircol.AddConstraint(dircol.initial_state()(3) == 0);
+  dircol.AddConstraint(dircol.initial_state()(4) == 0);
+  dircol.AddConstraint(dircol.initial_state()(5) == 0);
 
   dircol.AddConstraint(dircol.final_state()(0) >= dircol.initial_state()(0));
   dircol.AddConstraint(dircol.final_state()(1) == dircol.initial_state()(1));
@@ -229,9 +234,11 @@ int main() {
       auto pitch = traj.value(timestamps[i]).coeff(1);
       auto yaw = traj.value(timestamps[i]).coeff(2);
       auto altitude = traj.value(timestamps[i]).coeff(3);
+      auto x = traj.value(timestamps[i]).coeff(4);
+      auto y = traj.value(timestamps[i]).coeff(5);
       auto cL = inputs.value(timestamps[i]).coeff(0);
       auto roll = inputs.value(timestamps[i]).coeff(1);
-      printf("(%03.3f,  %03.3f, %03.3f, %03.3f, %03.3f,  %03.3f, %03.3f), # %3.3f\n", t, V, pitch, yaw, altitude, cL, roll, 9.8*altitude + .5*V*V);
+      printf("(%03.3f,  %03.3f, %03.3f, %03.3f, %03.3f, %03.3f, %03.3f,  %03.3f, %03.3f), # %3.3f\n", t, V, pitch, yaw, altitude, x, y, cL, roll, 9.8*altitude + .5*V*V);
     }
     printf("]\n");
   }
