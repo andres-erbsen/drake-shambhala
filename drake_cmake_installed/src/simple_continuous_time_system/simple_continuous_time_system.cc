@@ -55,6 +55,8 @@
 #include <drake/systems/framework/vector_system.h>
 #include <drake/systems/trajectory_optimization/direct_collocation.h>
 
+static const bool suction = 1; // http://frotor.fs.cvut.cz/doc/37.pdf section 3
+
 namespace shambhala {
 namespace systems {
 
@@ -85,18 +87,25 @@ class SimpleContinuousTimeSystem final : public drake::systems::VectorSystem<T> 
       Eigen::VectorBlock<drake::VectorX<T>>* derivatives) const override {
 
     // DS Kinetic 60
-    const double m = 2;
     const double g = 9.8;
-    const double cD0 = .005;
-    const double k = .08;
+    const double rho = 1.225 * .6; // ISA at 5km
+
+    const double m = 2; // http://www.dskinetic.com/k60.aspx
     const double S = .23;
-    const double rho = 1; // TODO real value
-    const double windspeed_gradient = .059; // jet stream at 5km: .02
-    // with -tau <= roll <= tau:
-    // // yaw+=pi: .57: infeasible .58: iterlimit .59 success
-    // // yaw+=0: .57: infeasible .58: infeasible .59: success
-    // with -tau/4 <= roll <= tau/4:
-    // // yaw+=pi: .57: infeasible .58: infeasible .59 success
+
+    const double cD0 = suction ? .0025 : .005; // https://www.tngtech.com/fileadmin/Public/Images/BigTechday/BTD10/Folien/Folien_SpencerLisenby.pdf
+    const double k = suction ? 0 : .006;
+
+    // rho = .1225*.6
+      // with suction:
+        // tau += 1: , .1 feasible,
+    // rho=1
+      // no suction
+        // tau += 0: .32 infeasible, .33 feasible
+        // tau += 1: .30 infeasible, .31 feasible
+      // with suction:
+        // tau += 0: .106 10min, .107 failed factorization, .108 feasible,
+        // tau += 1: .107 infeasible, .108 feasible,
 
     const auto& speed = state(0);
     const auto& pitch = state(1);
@@ -105,6 +114,8 @@ class SimpleContinuousTimeSystem final : public drake::systems::VectorSystem<T> 
 
     const auto& cL    = input(0);
     const auto& roll  = input(1);
+
+    const double windspeed_gradient = .01; // jet stream at 5km: .02
 
     const auto altitude_dot = speed*sin(pitch);
     const auto Wd = windspeed_gradient*altitude_dot;
@@ -145,9 +156,9 @@ int main() {
   shambhala::systems::SimpleContinuousTimeSystem<double> system;
 
   auto context = system.CreateDefaultContext();
-  const int N = 101;
-  const double dt_min = 20./N;
-  const double dt_max = 40./N;
+  const int N = 201;
+  const double dt_min = 8./N;
+  const double dt_max = 12./N;
   drake::systems::trajectory_optimization::DirectCollocation dircol(
       &system, *context, N, dt_min, dt_max);
   dircol.AddEqualTimeIntervalsConstraints();
@@ -157,7 +168,7 @@ int main() {
   auto tau = 4*acos(0);
 
   dircol.AddConstraintToAllKnotPoints(dircol.input()(0) >= 0); // 0 <= cL <= 1.2
-  dircol.AddConstraintToAllKnotPoints(dircol.input()(0) <= 1.2);
+  dircol.AddConstraintToAllKnotPoints(dircol.input()(0) <= (suction ? .9 : 1.2));
 
   dircol.AddConstraintToAllKnotPoints(dircol.state()(0) >= 0);
   dircol.AddConstraintToAllKnotPoints(dircol.state()(0) <= 140); // DS Kinetic 60 speed record 140 m/s
@@ -180,7 +191,7 @@ int main() {
 
   dircol.AddConstraint(dircol.final_state()(0) >= dircol.initial_state()(0));
   dircol.AddConstraint(dircol.final_state()(1) == dircol.initial_state()(1));
-  dircol.AddConstraint(dircol.final_state()(2) == dircol.initial_state()(2) + 0*tau);
+  dircol.AddConstraint(dircol.final_state()(2) == dircol.initial_state()(2) + 1*tau);
   dircol.AddConstraint(dircol.final_state()(3) >= dircol.initial_state()(3));
 
   // #define energy(x) (9.8*x(3) + 0*.5*x(0)*x(0))
