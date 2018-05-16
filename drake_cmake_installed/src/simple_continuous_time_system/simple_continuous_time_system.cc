@@ -105,13 +105,6 @@ class SimpleContinuousTimeSystem final : public drake::systems::VectorSystem<T> 
           // tau += 1: , .1 feasible,
         // no suction
           // tau += 1: .026 singular basis during factorization, .027 feasible,
-    // rho=1
-      // no suction
-        // tau += 0: .32 infeasible, .33 feasible
-        // tau += 1: .30 infeasible, .31 feasible
-      // with suction:
-        // tau += 0: .106 10min, .107 failed factorization, .108 feasible,
-        // tau += 1: .107 infeasible, .108 feasible,
 
     const auto& speed = state(0);
     const auto& pitch = state(1);
