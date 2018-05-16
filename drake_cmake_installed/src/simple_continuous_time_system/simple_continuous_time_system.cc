@@ -99,13 +99,6 @@ class SimpleContinuousTimeSystem final : public drake::systems::VectorSystem<T> 
     const double cD0 = suction ? .0025 : .005; // https://www.tngtech.com/fileadmin/Public/Images/BigTechday/BTD10/Folien/Folien_SpencerLisenby.pdf
     const double k = suction ? 0 : .006;
 
-    // rho = .1225*.6
-      // without return
-        // with suction:
-          // tau += 1: , .1 feasible,
-        // no suction
-          // tau += 1: .026 singular basis during factorization, .027 feasible,
-
     const auto& speed = state(0);
     const auto& pitch = state(1);
     const auto& yaw   = state(2);
@@ -114,7 +107,13 @@ class SimpleContinuousTimeSystem final : public drake::systems::VectorSystem<T> 
     const auto& cL    = input(0);
     const auto& roll  = input(1);
 
-    const double windspeed_gradient = .027; // jet stream at 5km: .02
+    const double windspeed_gradient = suction ? .01 : .027; // jet stream at 5km: .02
+    // rho = .1225*.6
+      // without return
+        // with suction:
+          // tau += 1: , .1 feasible,
+        // no suction
+          // tau += 1: .026 singular basis during factorization, .027 feasible,
 
     const auto zd = speed*sin(pitch);
     const auto W = windspeed_gradient*z;
@@ -201,11 +200,12 @@ int main() {
   // dircol.AddConstraint(dircol.final_state()(4) == dircol.initial_state()(4));
   // dircol.AddConstraint(dircol.final_state()(5) == dircol.initial_state()(5)); // no y constraint
 
-  // #define energy(x) (9.8*x(3) + 0*.5*x(0)*x(0))
-  // dircol.AddFinalCost(energy(dircol.initial_state()) - energy(dircol.state()));
-  // #undef energy
-
-  // dircol.AddConstraintToAllKnotPoints(dircol.state()(3) >=  dircol.initial_state()(0));
+  auto zmin = dircol.NewContinuousVariables(1, "zmin")(0);
+  auto zmax = dircol.NewContinuousVariables(1, "zmax")(0);
+  dircol.AddConstraintToAllKnotPoints(dircol.state()(3) >= zmin);
+  dircol.AddConstraintToAllKnotPoints(dircol.state()(3) <= zmax);
+  dircol.AddLinearCost(zmax-zmin);
+  dircol.AddLinearConstraint(zmax == -zmin);
 
   // solver spoonfeeding
   dircol.AddConstraintToAllKnotPoints(dircol.state()(0) >= 1); // nonzero speed!
