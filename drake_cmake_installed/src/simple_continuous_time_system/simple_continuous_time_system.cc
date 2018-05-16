@@ -55,7 +55,7 @@
 #include <drake/systems/framework/vector_system.h>
 #include <drake/systems/trajectory_optimization/direct_collocation.h>
 
-static const bool suction = 1; // http://frotor.fs.cvut.cz/doc/37.pdf section 3
+static const bool suction = 0; // http://frotor.fs.cvut.cz/doc/37.pdf section 3
 
 namespace shambhala {
 namespace systems {
@@ -100,8 +100,11 @@ class SimpleContinuousTimeSystem final : public drake::systems::VectorSystem<T> 
     const double k = suction ? 0 : .006;
 
     // rho = .1225*.6
-      // with suction:
-        // tau += 1: , .1 feasible,
+      // without return
+        // with suction:
+          // tau += 1: , .1 feasible,
+        // no suction
+          // tau += 1: .026 singular basis during factorization, .027 feasible,
     // rho=1
       // no suction
         // tau += 0: .32 infeasible, .33 feasible
@@ -118,7 +121,7 @@ class SimpleContinuousTimeSystem final : public drake::systems::VectorSystem<T> 
     const auto& cL    = input(0);
     const auto& roll  = input(1);
 
-    const double windspeed_gradient = .01; // jet stream at 5km: .02
+    const double windspeed_gradient = .027; // jet stream at 5km: .02
 
     const auto zd = speed*sin(pitch);
     const auto W = windspeed_gradient*z;
@@ -163,8 +166,8 @@ int main() {
 
   auto context = system.CreateDefaultContext();
   const int N = 201;
-  const double dt_min = 8./N;
-  const double dt_max = 12./N;
+  const double dt_min = 9./N;
+  const double dt_max = 13./N;
   drake::systems::trajectory_optimization::DirectCollocation dircol(
       &system, *context, N, dt_min, dt_max);
   dircol.AddEqualTimeIntervalsConstraints();
@@ -188,6 +191,7 @@ int main() {
   dircol.AddConstraintToAllKnotPoints(dircol.state()(3) >= -500); // max 1km altitude differential (arbitrary)
   dircol.AddConstraintToAllKnotPoints(dircol.state()(3) <=  500);
 
+
   // planning target
 
   // dircol.AddConstraint(dircol.initial_state()(0) == 13);
@@ -201,10 +205,14 @@ int main() {
   dircol.AddConstraint(dircol.final_state()(1) == dircol.initial_state()(1));
   dircol.AddConstraint(dircol.final_state()(2) == dircol.initial_state()(2) + 1*tau);
   dircol.AddConstraint(dircol.final_state()(3) >= dircol.initial_state()(3));
+  // dircol.AddConstraint(dircol.final_state()(4) == dircol.initial_state()(4));
+  // dircol.AddConstraint(dircol.final_state()(5) == dircol.initial_state()(5)); // no y constraint
 
   // #define energy(x) (9.8*x(3) + 0*.5*x(0)*x(0))
   // dircol.AddFinalCost(energy(dircol.initial_state()) - energy(dircol.state()));
   // #undef energy
+
+  // dircol.AddConstraintToAllKnotPoints(dircol.state()(3) >=  dircol.initial_state()(0));
 
   // solver spoonfeeding
   dircol.AddConstraintToAllKnotPoints(dircol.state()(0) >= 1); // nonzero speed!
