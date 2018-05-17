@@ -93,8 +93,8 @@ class SimpleContinuousTimeSystem final : public drake::systems::VectorSystem<T> 
     const double m = 2; // http://www.dskinetic.com/k60.aspx
     const double S = .23;
 
-    // const double Vc2 = m*g/(.5*rho*S);
-    // const double lambda = Vc2/g;
+    const double Vc2 = m*g/(.5*rho*S);
+    const double lambda = Vc2/g;
 
     const double cD0 = suction ? .0025 : .005; // https://www.tngtech.com/fileadmin/Public/Images/BigTechday/BTD10/Folien/Folien_SpencerLisenby.pdf
     const double k = suction ? 0 : .006;
@@ -116,8 +116,10 @@ class SimpleContinuousTimeSystem final : public drake::systems::VectorSystem<T> 
           // tau += 1: .026 singular basis during factorization, .027 feasible,
 
     const auto zd = speed*sin(pitch);
-    const auto W = windspeed_gradient*z;
-    const auto Wd = windspeed_gradient*zd;
+    const double delta = lambda/8;
+    const double W0 = .027*sqrt(Vc2); // 26.95 infeasible
+    const auto W = W0*tanh(z/delta);
+    const auto Wd = zd/delta*W0*(1/(cosh(z/delta)*cosh(z/delta)));
 
     const auto cD = cD0 + k*cL*cL;
     const auto D = .5*cD*rho*S*speed*speed;
@@ -157,9 +159,9 @@ int main() {
   shambhala::systems::SimpleContinuousTimeSystem<double> system;
 
   auto context = system.CreateDefaultContext();
-  const int N = 201;
-  const double dt_min = 9./N;
-  const double dt_max = 13./N;
+  const int N = 141;
+  const double dt_min = 5./N;
+  const double dt_max = 50./N;
   drake::systems::trajectory_optimization::DirectCollocation dircol(
       &system, *context, N, dt_min, dt_max);
   dircol.AddEqualTimeIntervalsConstraints();
@@ -195,17 +197,17 @@ int main() {
 
   dircol.AddConstraint(dircol.final_state()(0) >= dircol.initial_state()(0));
   dircol.AddConstraint(dircol.final_state()(1) == dircol.initial_state()(1));
-  dircol.AddConstraint(dircol.final_state()(2) == dircol.initial_state()(2) + 1*tau);
+  dircol.AddConstraint(dircol.final_state()(2) == dircol.initial_state()(2) + 0*tau);
   dircol.AddConstraint(dircol.final_state()(3) >= dircol.initial_state()(3));
   // dircol.AddConstraint(dircol.final_state()(4) == dircol.initial_state()(4));
   // dircol.AddConstraint(dircol.final_state()(5) == dircol.initial_state()(5)); // no y constraint
 
-  auto zmin = dircol.NewContinuousVariables(1, "zmin")(0);
-  auto zmax = dircol.NewContinuousVariables(1, "zmax")(0);
-  dircol.AddConstraintToAllKnotPoints(dircol.state()(3) >= zmin);
-  dircol.AddConstraintToAllKnotPoints(dircol.state()(3) <= zmax);
-  dircol.AddLinearCost(zmax-zmin);
-  dircol.AddLinearConstraint(zmax == -zmin);
+  // auto zmin = dircol.NewContinuousVariables(1, "zmin")(0);
+  // auto zmax = dircol.NewContinuousVariables(1, "zmax")(0);
+  // dircol.AddConstraintToAllKnotPoints(dircol.state()(3) >= zmin);
+  // dircol.AddConstraintToAllKnotPoints(dircol.state()(3) <= zmax);
+  // dircol.AddLinearCost(zmax-zmin);
+  // dircol.AddLinearConstraint(zmax == -zmin);
 
   // solver spoonfeeding
   dircol.AddConstraintToAllKnotPoints(dircol.state()(0) >= 1); // nonzero speed!
