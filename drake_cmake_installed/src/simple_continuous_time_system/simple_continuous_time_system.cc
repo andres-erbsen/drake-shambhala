@@ -97,7 +97,7 @@ class SimpleContinuousTimeSystem final : public drake::systems::VectorSystem<T> 
     const double lambda = Vc2/g;
 
     const double cD0 = suction ? .0025 : .005; // https://www.tngtech.com/fileadmin/Public/Images/BigTechday/BTD10/Folien/Folien_SpencerLisenby.pdf
-    const double k = suction ? 0 : .006;
+    const double k = suction ? 0 : .125;
 
     const auto& speed = state(0);
     const auto& pitch = state(1);
@@ -117,7 +117,7 @@ class SimpleContinuousTimeSystem final : public drake::systems::VectorSystem<T> 
 
     const auto zd = speed*sin(pitch);
     const double delta = lambda/8;
-    const double W0 = .027*sqrt(Vc2); // 26.95 infeasible
+    const double W0 = .219*sqrt(Vc2); // 26.95 infeasible
     const auto W = W0*tanh(z/delta);
     const auto Wd = zd/delta*W0*(1/(cosh(z/delta)*cosh(z/delta)));
 
@@ -160,8 +160,8 @@ int main() {
 
   auto context = system.CreateDefaultContext();
   const int N = 141;
-  const double dt_min = 5./N;
-  const double dt_max = 50./N;
+  const double dt_min = 4./N;
+  const double dt_max = 9./N;
   drake::systems::trajectory_optimization::DirectCollocation dircol(
       &system, *context, N, dt_min, dt_max);
   dircol.AddEqualTimeIntervalsConstraints();
