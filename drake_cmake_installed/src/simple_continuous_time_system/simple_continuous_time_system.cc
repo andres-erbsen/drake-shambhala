@@ -29,16 +29,6 @@
  * POSSIBILITY OF SUCH DAMAGE.
  *****************************************************************************/
 
-/**
- * @file apps/simple_continuous_time_system.cc
- *
- * Simple Continuous Time System Example
- *
- * This is meant to be a sort of "hello world" example for the drake::system
- * classes. It defines a very simple continuous time system, simulates it from
- * a given initial condition, and plots the result.
- */
-
 #include <cmath>
 #include <cstdio>
 
@@ -55,17 +45,9 @@
 #include <drake/systems/framework/vector_system.h>
 #include <drake/systems/trajectory_optimization/direct_collocation.h>
 
-static const bool suction = 0; // http://frotor.fs.cvut.cz/doc/37.pdf section 3
-
 namespace shambhala {
 namespace systems {
 
-/**
- * Simple Continuous Time System
- *
- * xdot = -x + x^3
- * y = x
- */
 template <typename T>
 class SimpleContinuousTimeSystem final : public drake::systems::VectorSystem<T> {
  public:
@@ -96,8 +78,8 @@ class SimpleContinuousTimeSystem final : public drake::systems::VectorSystem<T> 
     // const double Vc2 = m*g/(.5*rho*S);
     // const double lambda = Vc2/g;
 
-    const double cD0 = suction ? .0025 : .005; // https://www.tngtech.com/fileadmin/Public/Images/BigTechday/BTD10/Folien/Folien_SpencerLisenby.pdf
-    const double k = suction ? 0 : .006;
+    const double cD0 = .005; // https://www.tngtech.com/fileadmin/Public/Images/BigTechday/BTD10/Folien/Folien_SpencerLisenby.pdf
+    const double k = .006;
 
     const auto& speed = state(0);
     const auto& pitch = state(1);
@@ -107,13 +89,7 @@ class SimpleContinuousTimeSystem final : public drake::systems::VectorSystem<T> 
     const auto& cL    = input(0);
     const auto& roll  = input(1);
 
-    const double windspeed_gradient = suction ? .01 : .027; // jet stream at 5km: .02
-    // rho = .1225*.6
-      // without return
-        // with suction:
-          // tau += 1: , .1 feasible,
-        // no suction
-          // tau += 1: .026 singular basis during factorization, .027 feasible,
+    const double windspeed_gradient = .027; // jet stream at 5km: .02
 
     const auto zd = speed*sin(pitch);
     const auto W = windspeed_gradient*z;
@@ -129,10 +105,6 @@ class SimpleContinuousTimeSystem final : public drake::systems::VectorSystem<T> 
     (*derivatives)(3) = zd;
     (*derivatives)(4) = speed*cos(pitch)*cos(yaw);
     (*derivatives)(5) = speed*cos(pitch)*sin(yaw) - W;
-
-    // notes:
-    // ipopt needs speed replaced with (1e-4+speed), snopt only needs that if speed is not constrained away from 0
-
   }
 
   // y = x
@@ -169,7 +141,7 @@ int main() {
   auto tau = 4*acos(0);
 
   dircol.AddConstraintToAllKnotPoints(dircol.input()(0) >= 0); // 0 <= cL <= 1.2
-  dircol.AddConstraintToAllKnotPoints(dircol.input()(0) <= (suction ? .9 : 1.2));
+  dircol.AddConstraintToAllKnotPoints(dircol.input()(0) <= 1.2);
 
   dircol.AddConstraintToAllKnotPoints(dircol.state()(0) >= 0);
   dircol.AddConstraintToAllKnotPoints(dircol.state()(0) <= 140); // DS Kinetic 60 speed record 140 m/s
@@ -186,19 +158,13 @@ int main() {
 
   // planning target
 
-  // dircol.AddConstraint(dircol.initial_state()(0) == 13);
-  // dircol.AddConstraint(dircol.initial_state()(1) == 0);
-  // dircol.AddConstraint(dircol.initial_state()(2) == 0);
-  // dircol.AddConstraint(dircol.initial_state()(3) == 0);
-  dircol.AddConstraint(dircol.initial_state()(4) == 0);
+  // dircol.AddConstraint(dircol.initial_state()(4) == 0); // x_N = x_0
   dircol.AddConstraint(dircol.initial_state()(5) == 0);
 
   dircol.AddConstraint(dircol.final_state()(0) >= dircol.initial_state()(0));
   dircol.AddConstraint(dircol.final_state()(1) == dircol.initial_state()(1));
   dircol.AddConstraint(dircol.final_state()(2) == dircol.initial_state()(2) + 1*tau);
   dircol.AddConstraint(dircol.final_state()(3) >= dircol.initial_state()(3));
-  // dircol.AddConstraint(dircol.final_state()(4) == dircol.initial_state()(4));
-  // dircol.AddConstraint(dircol.final_state()(5) == dircol.initial_state()(5)); // no y constraint
 
   auto zmin = dircol.NewContinuousVariables(1, "zmin")(0);
   auto zmax = dircol.NewContinuousVariables(1, "zmax")(0);
@@ -208,6 +174,7 @@ int main() {
   dircol.AddLinearConstraint(zmax == -zmin);
 
   // solver spoonfeeding
+
   dircol.AddConstraintToAllKnotPoints(dircol.state()(0) >= 1); // nonzero speed!
 
   dircol.AddConstraintToAllKnotPoints(dircol.input()(1) >= -tau/4); // do not turn the plane upside down
@@ -216,6 +183,7 @@ int main() {
   dircol.SetSolverOption(drake::solvers::SnoptSolver::id(), "Iterations limit", 10000000);
   dircol.SetSolverOption(drake::solvers::SnoptSolver::id(), "Major iterations limit", 10000);
 
+  // solving
 
   auto result = dircol.Solve();
   if (result != drake::solvers::SolutionResult::kSolutionFound) {
@@ -223,6 +191,8 @@ int main() {
     printf("solving failed: %s\n", s.c_str());
     return 1;
   }
+
+  // printing
 
   {
     auto inputs = dircol.ReconstructInputTrajectory();
